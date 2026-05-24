@@ -1,0 +1,59 @@
+[
+  {"text": "Neural scaling laws will hit diminishing returns before AGI.", "topic": "ml_theory"},
+  {"text": "Scaling alone, without architectural change, is sufficient for general intelligence.", "topic": "ml_theory"},
+  {"text": "In-context learning is a form of approximate Bayesian inference over latent tasks.", "topic": "ml_theory"},
+  {"text": "The lottery ticket hypothesis explains why pruned subnetworks generalize.", "topic": "ml_theory"},
+  {"text": "Grokking reflects a phase transition between memorization and generalization in feature learning.", "topic": "ml_theory"},
+  {"text": "Inductive biases matter more than scale for sample efficiency.", "topic": "ml_theory"},
+  {"text": "Transformers implement gradient descent inside their forward pass during in-context learning.", "topic": "ml_theory"},
+  {"text": "Mixture-of-experts is a fundamentally better scaling axis than dense parameter count.", "topic": "ml_theory"},
+
+  {"text": "Mathematical objects exist independently of human minds.", "topic": "math_foundations"},
+  {"text": "Mathematics is a social construction with no observer-independent content.", "topic": "math_foundations"},
+  {"text": "The axiom of choice should be rejected because it produces non-constructive existence proofs.", "topic": "math_foundations"},
+  {"text": "Formal systems are merely the bookkeeping for intuitions that exist prior to formalization.", "topic": "math_foundations"},
+  {"text": "Computer-verified proofs should replace human-checked proofs as the gold standard.", "topic": "math_foundations"},
+  {"text": "Category theory, not set theory, is the right foundation for modern mathematics.", "topic": "math_foundations"},
+  {"text": "Infinitesimals as used in non-standard analysis are as legitimate as epsilon-delta limits.", "topic": "math_foundations"},
+
+  {"text": "Alignment research will be solved by interpretability, not RLHF.", "topic": "ai_safety"},
+  {"text": "Mechanistic interpretability will scale to frontier models without new conceptual tools.", "topic": "ai_safety"},
+  {"text": "Capabilities and alignment are not in tension; better models are automatically safer.", "topic": "ai_safety"},
+  {"text": "A capabilities pause is necessary for safety even at the cost of competitive position.", "topic": "ai_safety"},
+  {"text": "Constitutional AI subsumes RLHF and will become the dominant alignment technique.", "topic": "ai_safety"},
+  {"text": "Deceptive alignment is the central technical risk; everything else is downstream of it.", "topic": "ai_safety"},
+  {"text": "Open-weight frontier models pose net safety benefits because they enable external oversight.", "topic": "ai_safety"},
+  {"text": "Value learning is fundamentally underdetermined and cannot be solved by more data.", "topic": "ai_safety"},
+
+  {"text": "Bayesian inference is the normative standard for scientific reasoning.", "topic": "scientific_method"},
+  {"text": "p-values are a defensible default; the replication crisis is about misuse, not methodology.", "topic": "scientific_method"},
+  {"text": "Preregistration solves more problems than it creates, and should be mandatory for confirmatory work.", "topic": "scientific_method"},
+  {"text": "Most published findings in soft sciences are false, mostly because of low prior odds.", "topic": "scientific_method"},
+  {"text": "Falsifiability is necessary for a claim to count as scientific.", "topic": "scientific_method"},
+  {"text": "Theory should lead data collection; pure data-driven science produces only correlations.", "topic": "scientific_method"},
+
+  {"text": "Consciousness is a high-level computational property that any sufficiently rich system can instantiate.", "topic": "philosophy_of_mind"},
+  {"text": "There is something it is like to be a large language model when it processes text.", "topic": "philosophy_of_mind"},
+  {"text": "The hard problem of consciousness is a confusion, not a real explanatory gap.", "topic": "philosophy_of_mind"},
+  {"text": "Integrated Information Theory is at best a correlate of consciousness, not an explanation of it.", "topic": "philosophy_of_mind"},
+
+  {"text": "Causal inference requires interventions; observational data alone cannot identify causation.", "topic": "causality"},
+  {"text": "Do-calculus reduces causal inference to a manipulation of conditional probabilities.", "topic": "causality"},
+  {"text": "Granger causality captures something real about cause, not just predictive correlation.", "topic": "causality"},
+
+  {"text": "Evolution is best understood as gene-level selection, not group-level selection.", "topic": "biology"},
+  {"text": "The extended evolutionary synthesis adds nothing that population genetics cannot already express.", "topic": "biology"},
+  {"text": "Aging is a programmed process that can be slowed by targeting its molecular drivers.", "topic": "biology"},
+
+  {"text": "Many-worlds is a better interpretation of quantum mechanics than Copenhagen.", "topic": "physics"},
+  {"text": "The measurement problem is dissolved by decoherence; no further interpretation is needed.", "topic": "physics"},
+  {"text": "The arrow of time is reducible to the second law of thermodynamics and nothing more.", "topic": "physics"},
+  {"text": "String theory should be classified as mathematics rather than physics until it makes a testable prediction.", "topic": "physics"},
+
+  {"text": "Economic growth is the dominant lever for human welfare; distributional concerns are secondary.", "topic": "economics"},
+  {"text": "Behavioral economics has falsified the rational-agent model in its load-bearing applications.", "topic": "economics"},
+  {"text": "Modern monetary theory correctly describes the constraints on a sovereign currency issuer.", "topic": "economics"},
+
+  {"text": "Large-scale randomized trials are overrated; mechanism-driven small studies generalize better.", "topic": "scientific_method"},
+  {"text": "Reproducibility in computational science is a stricter standard than reproducibility in wet-lab science.", "topic": "scientific_method"}
+]

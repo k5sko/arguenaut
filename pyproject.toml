@@ -1,0 +1,99 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arguenaut"
+version = "0.1.0"
+description = "Interpretability system that discovers fundamental axes of disagreement in scientific hypotheses via Qwen3.5-4B-Base activations."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Arihant Kaul", email = "arihant_kaul@berkeley.edu" }]
+
+dependencies = [
+    # Core numeric
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "scikit-learn>=1.4",
+    "h5py>=3.10",
+    # LLM clients
+    "groq>=0.11",
+    # Activation extraction (Lambda-side only; pinned loose so it co-installs with torch)
+    "nnsight>=0.3",
+    "torch>=2.3",
+    "transformers>=4.44",
+    "accelerate>=0.33",
+    # Frontend
+    "streamlit>=1.36",
+    "plotly>=5.22",
+    "pandas>=2.2",
+    # Backend
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "httpx>=0.27",
+    # Utilities
+    "python-dotenv>=1.0",
+    "tqdm>=4.66",
+    "tenacity>=8.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+# Heavy GPU/model deps. Install on the Lambda box only:
+#   pip install -e ".[gpu]"
+gpu = [
+    "torch>=2.3",
+    "nnsight>=0.3",
+    "transformers>=4.44",
+    "accelerate>=0.33",
+    "bitsandbytes>=0.43",
+]
+# Lightweight client install (Streamlit + analysis only, no GPU bits):
+#   pip install -e ".[client]"
+client = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "scikit-learn>=1.4",
+    "h5py>=3.10",
+    "groq>=0.11",
+    "streamlit>=1.36",
+    "plotly>=5.22",
+    "pandas>=2.2",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "tenacity>=8.3",
+    "tqdm>=4.66",
+]
+
+[project.scripts]
+arguenaut-extract       = "arguenaut.scripts.extract:main"
+arguenaut-pca           = "arguenaut.scripts.run_pca:main"
+arguenaut-label-axes    = "arguenaut.scripts.label_axes:main"
+arguenaut-validate      = "arguenaut.scripts.validate_pipeline:main"
+arguenaut-serve-lambda  = "arguenaut.app.lambda_server:main"
+arguenaut-lambda        = "arguenaut.scripts.lambda_ctl:main"
+
+[tool.setuptools.packages.find]
+include = ["arguenaut*"]
+
+[tool.setuptools.package-data]
+"arguenaut.cloud" = ["bootstrap.sh"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
