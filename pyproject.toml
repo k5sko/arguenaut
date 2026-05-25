@@ -7,7 +7,7 @@ name = "arguenaut"
 version = "0.1.0"
 description = "Interpretability system that discovers fundamental axes of disagreement in scientific hypotheses via Qwen3.5-4B-Base activations."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Arihant Kaul", email = "arihant_kaul@berkeley.edu" }]
 

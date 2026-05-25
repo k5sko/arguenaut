@@ -37,15 +37,38 @@ def _cmd_up(args: argparse.Namespace) -> int:
     info = prov.ensure_up(bootstrap=not args.no_bootstrap)
     print(f"instance:  {info.instance_id}")
     print(f"ip:        {info.ip}")
-    print(f"api_url:   {info.api_url}")
     print(f"new:       {info.is_new}")
+
+    # Lambda's firewall blocks inbound 8000 and the server is unauthenticated, so
+    # reach it through an SSH tunnel and point the app/scripts at localhost.
+    api_url = info.api_url
+    if not args.no_tunnel:
+        from arguenaut.cloud.state import LambdaState, load_state, save_state
+        from arguenaut.cloud.tunnel import open_tunnel
+
+        st = load_state()
+        port = st.api_port if st else 8000
+        ip = st.ip if st else info.ip
+        user = st.ssh_user if st else "ubuntu"
+        pid = open_tunnel(
+            ip=ip, user=user, key_path=settings.lambda_ssh_key_path,
+            local_port=port, remote_port=port,
+        )
+        if pid is None:
+            print("WARNING: tunnel failed to open; the app won't reach the box", file=sys.stderr)
+        else:
+            api_url = f"http://localhost:{port}"
+            if st is not None:
+                save_state(LambdaState(**{**st.to_dict(), "api_url": api_url}))
+            print(f"tunnel:    localhost:{port} -> {ip}:{port}  (pid {pid})")
+    print(f"api_url:   {api_url}")
 
     if args.wait_healthy:
         deadline = time.time() + 600
         print("waiting for /health …", file=sys.stderr)
         while time.time() < deadline:
             try:
-                r = httpx.get(f"{info.api_url}/health", timeout=10)
+                r = httpx.get(f"{api_url}/health", timeout=10)
                 if r.status_code == 200 and r.json().get("loaded"):
                     print("HEALTHY", file=sys.stderr)
                     return 0
@@ -58,6 +81,10 @@ def _cmd_up(args: argparse.Namespace) -> int:
 
 
 def _cmd_down(args: argparse.Namespace) -> int:
+    from arguenaut.cloud.tunnel import close_tunnel
+
+    if close_tunnel():
+        print("tunnel closed")
     prov = LambdaProvisioner()
     ok = prov.down()
     print("terminated" if ok else "no tracked instance to terminate")
@@ -149,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--file-system", default=None, help="override LAMBDA_FILE_SYSTEM_NAME")
     up.add_argument("--git-ref", default=None, help="override LAMBDA_GIT_REF (branch/tag/sha)")
     up.add_argument("--no-bootstrap", action="store_true", help="just launch, skip the install step")
+    up.add_argument("--no-tunnel", action="store_true", help="don't open the SSH tunnel to the server")
     up.add_argument("--wait-healthy", action="store_true", help="block until /health returns 200 + model loaded")
     up.set_defaults(func=_cmd_up)
 

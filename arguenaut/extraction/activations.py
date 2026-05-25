@@ -68,27 +68,33 @@ class ActivationExtractor:
             return
         try:
             import torch
-            from nnsight import LanguageModel
+            from transformers import AutoModelForCausalLM, AutoTokenizer
         except ImportError as e:
             raise ImportError(
-                "ActivationExtractor needs `nnsight` and `torch`. "
+                "ActivationExtractor needs `torch` and `transformers`. "
                 "Install with `pip install -e '.[gpu]'`."
             ) from e
 
         torch_dtype = getattr(torch, self.dtype)
-        logger.info("Loading %s (dtype=%s, device_map=%s) via nnsight", self.model_id, self.dtype, self.device_map)
-        self._lm = LanguageModel(
-            self.model_id,
-            device_map=self.device_map,
-            torch_dtype=torch_dtype,
-            dispatch=True,
-        )
-        self._tokenizer = self._lm.tokenizer
+        logger.info("Loading %s (dtype=%s, device_map=%s)", self.model_id, self.dtype, self.device_map)
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
         if self._tokenizer.pad_token_id is None:
             self._tokenizer.pad_token = self._tokenizer.eos_token
 
+        # transformers >=5 renamed `torch_dtype` to `dtype`; support both.
+        try:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id, device_map=self.device_map, dtype=torch_dtype
+            )
+        except TypeError:
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id, device_map=self.device_map, torch_dtype=torch_dtype
+            )
+        model.eval()
+        self._lm = model
+
         # Inspect architecture for n_layers / d_model.
-        cfg = self._lm.config
+        cfg = model.config
         self._n_layers = int(getattr(cfg, "num_hidden_layers"))
         self._d_model = int(getattr(cfg, "hidden_size"))
         logger.info("Model loaded: %d layers, d_model=%d", self._n_layers, self._d_model)
@@ -114,8 +120,13 @@ class ActivationExtractor:
     def extract_batch(
         self, texts: Sequence[str], max_length: int = 512
     ) -> list[ExtractionResult]:
-        """Run a batch of texts through the model under nnsight.trace, returning
-        per-text last-token + mean-pooled activations across every layer."""
+        """Run a batch of texts through the model with output_hidden_states,
+        returning per-text last-token + mean-pooled activations across every layer.
+
+        Uses plain HuggingFace forward passes (not nnsight) under
+        torch.inference_mode — `output_hidden_states` exposes the residual stream
+        after each block, which is exactly what we want, and is stable across
+        transformers/torch versions."""
         if self._lm is None:
             self.load()
         assert self._lm is not None and self._tokenizer is not None
@@ -132,29 +143,25 @@ class ActivationExtractor:
             truncation=True,
             max_length=max_length,
         )
-        input_ids = enc["input_ids"]
-        attn_mask = enc["attention_mask"]
+        attn_mask = enc["attention_mask"]  # keep CPU copy for pooling
+        device = next(self._lm.parameters()).device
+        input_ids = enc["input_ids"].to(device)
 
-        # Resolve the layer modules. Qwen / Llama / Mistral all expose
-        # `model.model.layers[i]`; fall back to common alternatives if needed.
-        layers = _resolve_layers(self._lm)
-        if len(layers) != self._n_layers:
-            logger.warning(
-                "Resolved %d layer modules but config says %d", len(layers), self._n_layers
+        with torch.inference_mode():
+            out = self._lm(
+                input_ids=input_ids,
+                attention_mask=attn_mask.to(device),
+                output_hidden_states=True,
+                use_cache=False,
             )
 
-        with self._lm.trace(input_ids, attention_mask=attn_mask) as tracer:  # noqa: F841
-            saved = []
-            for layer in layers:
-                # Block output is a tuple — first element is the hidden state.
-                out = layer.output
-                # `out` may be a tuple proxy; index [0] reliably.
-                hidden = out[0]
-                saved.append(hidden.save())
-
-        # After the trace exits, .value holds the resolved tensor on CPU.
-        # Shape per layer: [batch, seq, d_model]
-        layer_acts = [s.value.detach().to(torch.float32).cpu().numpy() for s in saved]
+        # hidden_states is a tuple of length n_layers+1: [0] is the embedding
+        # output, [1:] are the residual stream after each transformer block.
+        # Move each layer to CPU individually to keep peak GPU memory low.
+        layer_acts = [
+            h.detach().to(torch.float32).cpu().numpy() for h in out.hidden_states[1:]
+        ]
+        del out
         # Stack to [n_layers, batch, seq, d_model]
         stacked = np.stack(layer_acts, axis=0)
         del layer_acts
@@ -175,32 +182,3 @@ class ActivationExtractor:
             results.append(ExtractionResult(last_token=last, mean_pooled=mean, n_tokens=n_tok))
 
         return results
-
-
-def _resolve_layers(lm) -> list:
-    """Find the list of transformer blocks across HF families.
-
-    Tries the common attribute paths used by Qwen, Llama, Mistral, Falcon, GPT-NeoX, GPT-2.
-    """
-    candidates = (
-        ("model", "layers"),
-        ("model", "model", "layers"),
-        ("transformer", "h"),
-        ("transformer", "blocks"),
-        ("gpt_neox", "layers"),
-    )
-    for path in candidates:
-        node = lm
-        ok = True
-        for attr in path:
-            if not hasattr(node, attr):
-                ok = False
-                break
-            node = getattr(node, attr)
-        if ok:
-            try:
-                # nnsight modules behave like sequences
-                return [node[i] for i in range(len(node))]
-            except TypeError:
-                continue
-    raise RuntimeError("Could not locate transformer block list on this model")

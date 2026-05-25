@@ -21,7 +21,7 @@ import os
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from arguenaut.cloud.auto_shutdown import maybe_install
+from arguenaut.cloud.auto_shutdown import install_idle_middleware
 from arguenaut.config import settings
 from arguenaut.extraction import ActivationExtractor
 from arguenaut.generation import PerspectiveGenerator
@@ -34,7 +34,9 @@ app = FastAPI(title="Arguenaut Lambda backend", version="0.1.0")
 # Module-level singletons so the (heavy) model loads once per process.
 _extractor: ActivationExtractor | None = None
 _generator: PerspectiveGenerator | None = None
-_watcher = None
+# Middleware must be registered before the app starts, so create the watcher at
+# import time. Its thread is started later, in _warm(), after the model loads.
+_watcher = install_idle_middleware(app, settings)
 
 
 class AnalyzeRequest(BaseModel):
@@ -58,12 +60,17 @@ def _check_auth(auth_header: str | None) -> None:
 
 @app.on_event("startup")
 def _warm() -> None:
-    global _extractor, _generator, _watcher
+    global _extractor, _generator
     logger.info("Warming up: loading model %s", settings.hf_model_id)
     _extractor = ActivationExtractor()
     _extractor.load()
     _generator = PerspectiveGenerator()
-    _watcher = maybe_install(app, settings)
+    # Start the idle-shutdown thread now that the model is loaded, resetting the
+    # timer so load time doesn't count as idle. (Middleware was registered at
+    # import time; see install_idle_middleware.)
+    if _watcher is not None:
+        _watcher.note_request()
+        _watcher.start()
     logger.info("Ready.")
 
 

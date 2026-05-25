@@ -85,8 +85,14 @@ class IdleShutdownWatcher:
             return
 
 
-def maybe_install(app, settings) -> IdleShutdownWatcher | None:
-    """Attach the watcher + a request middleware to a FastAPI app, if env supports it."""
+def install_idle_middleware(app, settings) -> IdleShutdownWatcher | None:
+    """Create the idle watcher and register request-tracking middleware.
+
+    MUST be called at import time, *before* the app starts — modern Starlette
+    forbids adding middleware once the application has started. The watcher
+    thread is NOT started here; call ``watcher.start()`` after warm-up so that
+    model-loading time isn't counted toward the idle timeout.
+    """
     instance_id = os.environ.get("ARGUENAUT_LAMBDA_INSTANCE_ID")
     api_key = settings.lambda_cloud_api_key
     minutes = settings.lambda_auto_shutdown_minutes
@@ -108,5 +114,8 @@ def maybe_install(app, settings) -> IdleShutdownWatcher | None:
             watcher.note_request()
         return await call_next(request)
 
-    watcher.start()
     return watcher
+
+
+# Back-compat alias (older callers).
+maybe_install = install_idle_middleware

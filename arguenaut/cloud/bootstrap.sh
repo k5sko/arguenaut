@@ -77,19 +77,36 @@ if [ "$PFS" != "none" ] && [ -d "$PFS" ]; then
     mv .env.tmp .env
 fi
 
-# ── venv + install ──────────────────────────────────────────────────────────
-if [ ! -d .venv ]; then
-    echo "[bootstrap] creating venv"
-    python3 -m venv .venv
+# ── venv + install (via uv) ──────────────────────────────────────────────────
+# Lambda images ship Python 3.10, but numpy/scipy/etc. now require >=3.11. Rather
+# than fight each dependency, use uv to provision a standalone Python 3.12 and
+# install everything from prebuilt wheels (no source compilation).
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+if ! command -v uv >/dev/null 2>&1; then
+    echo "[bootstrap] installing uv"
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 fi
-# shellcheck disable=SC1091
-source .venv/bin/activate
-pip install --quiet --upgrade pip wheel
-echo "[bootstrap] pip install -e .[gpu]  (this may take a while on first run)"
-# --ignore-requires-python: some Lambda images ship Python 3.10, and the code is
-# 3.10-compatible (all modules use `from __future__ import annotations`), so the
-# >=3.11 metadata floor is overly strict. Bypassing the check is safe here.
-pip install --quiet --ignore-requires-python -e ".[gpu]"
+
+# Drop any stale venv built with an old Python (e.g. a previous failed run).
+if [ -d .venv ] && ! .venv/bin/python -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3, 11) else 1)' 2>/dev/null; then
+    echo "[bootstrap] existing .venv uses Python <3.11; recreating"
+    rm -rf .venv
+fi
+if [ ! -d .venv ]; then
+    echo "[bootstrap] creating venv (Python 3.12 via uv)"
+    uv venv --python 3.12 .venv
+fi
+
+echo "[bootstrap] uv pip install -e .[gpu]  (this may take a while on first run)"
+uv pip install --python "$WORKDIR/.venv/bin/python" -e ".[gpu]"
+
+# PyPI's default torch wheel targets the newest CUDA (cu130), but Lambda A10
+# boxes run a driver that supports CUDA 12.8. Force the cu128 build so the GPU
+# is actually usable (otherwise torch.cuda.is_available() is False).
+echo "[bootstrap] installing CUDA 12.8-matched torch"
+uv pip install --python "$WORKDIR/.venv/bin/python" --reinstall-package torch \
+    torch --index-url https://download.pytorch.org/whl/cu128
 
 # ── Restart server ──────────────────────────────────────────────────────────
 echo "[bootstrap] stopping any existing arguenaut server"

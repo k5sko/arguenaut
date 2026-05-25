@@ -18,3 +18,8 @@ data/*.sqlite
 data/cache/
 .DS_Store
 .ipynb_checkpoints/
+
+# Lambda runtime state (machine-specific, not for VCS)
+data/.lambda-state.json
+data/.lambda-tunnel.pid
+data/tunnel.log
