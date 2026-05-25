@@ -57,6 +57,59 @@ Each text should be a self-contained 2–4 sentence argument. No headers, no lab
 """
 
 
+# ── diverse generation for single-prompt axis discovery ─────────────────────
+# A single prompt needs MANY varied perspectives (not 6) for PCA to recover
+# meaningful axes. We span a grid of intellectual *lenses* × *stances* so the
+# resulting cloud of points varies along several independent directions.
+DIVERSITY_LENSES: tuple[str, ...] = (
+    "empirical / evidence-driven",
+    "theoretical / mechanistic",
+    "historical / precedent-based",
+    "ethical / normative",
+    "economic / incentive-based",
+    "methodological / epistemic",
+    "pragmatic / engineering",
+    "social / institutional",
+)
+
+DIVERSITY_STANCES: tuple[str, ...] = (
+    "strongly affirms the claim",
+    "cautiously affirms the claim",
+    "cautiously rejects the claim",
+    "strongly rejects the claim",
+    "rejects the framing and reframes the question",
+)
+
+
+def build_viewpoints(n: int) -> list[tuple[str, str]]:
+    """Return up to `n` (lens, stance) viewpoint pairs, interleaved so that any
+    prefix of the list stays diverse in both lens and stance."""
+    combos: list[tuple[str, str]] = []
+    # Diagonal interleave: offset the stance index by the lens index so that
+    # consecutive entries differ in both dimensions.
+    for k in range(len(DIVERSITY_LENSES) * len(DIVERSITY_STANCES)):
+        lens = DIVERSITY_LENSES[k % len(DIVERSITY_LENSES)]
+        stance = DIVERSITY_STANCES[(k + k // len(DIVERSITY_LENSES)) % len(DIVERSITY_STANCES)]
+        combos.append((lens, stance))
+    return combos[:n]
+
+
+DIVERSE_SYSTEM_PROMPT = """You are a panel of scientists and philosophers debating a hypothesis.
+You will be given a numbered list of viewpoints. For EACH numbered viewpoint, write ONE self-contained
+2–4 sentence argument that genuinely embodies that viewpoint's lens and stance — cite mechanisms,
+evidence, or theoretical commitments. Arguments must differ substantively, not just in adjectives.
+Do not hedge or write meta-commentary. No headers or labels inside the text.
+
+Return STRICT JSON — no prose, no markdown fences:
+{"perspectives": [{"id": <number>, "text": "<argument>"}, ...]}
+"""
+
+DIVERSE_USER_TEMPLATE = """Hypothesis: {hypothesis}
+
+Write one argument for each numbered viewpoint below:
+{viewpoint_list}"""
+
+
 @dataclass
 class Perspective:
     stance: str
@@ -122,8 +175,90 @@ class PerspectiveGenerator:
         parsed = _parse_perspective_json(raw, expected_stances=self.stances)
         return parsed
 
+    def generate_many(
+        self,
+        hypothesis: str,
+        n: int = 32,
+        batch_size: int = 8,
+    ) -> list[Perspective]:
+        """Generate ~`n` diverse perspectives on a single hypothesis.
+
+        Spans a grid of intellectual lenses × stances (see build_viewpoints) so
+        that PCA over the resulting activations has enough independent variation
+        to recover real axes of disagreement. Issued in batches of `batch_size`
+        viewpoints per Groq call to stay within the JSON/token budget.
+
+        Each returned Perspective's `stance` field is a short "lens · stance"
+        tag (used for hover/colour in the app); `position` is its index 0..n-1.
+        Missing items from a malformed batch are skipped rather than fatal — a
+        few dropped perspectives don't hurt the PCA.
+        """
+        if not hypothesis or not hypothesis.strip():
+            raise ValueError("hypothesis must be non-empty")
+        hypothesis = hypothesis.strip()
+        viewpoints = build_viewpoints(n)
+
+        out: list[Perspective] = []
+        for start in range(0, len(viewpoints), batch_size):
+            chunk = viewpoints[start : start + batch_size]
+            numbered = "\n".join(
+                f"  {start + j}. From a {lens} lens, an argument that {stance}."
+                for j, (lens, stance) in enumerate(chunk)
+            )
+            messages = [
+                {"role": "system", "content": DIVERSE_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": DIVERSE_USER_TEMPLATE.format(
+                        hypothesis=hypothesis, viewpoint_list=numbered
+                    ),
+                },
+            ]
+            raw = self._call(messages)
+            by_id = _parse_diverse_json(raw)
+            for j, (lens, stance) in enumerate(chunk):
+                idx = start + j
+                text = by_id.get(idx)
+                if not text:
+                    continue
+                short_lens = lens.split(" / ")[0]
+                short_stance = stance.replace("the claim", "").replace("the framing and ", "").strip()
+                out.append(
+                    Perspective(stance=f"{short_lens} · {short_stance}", text=text, position=idx)
+                )
+        if len(out) < 4:
+            raise PerspectiveGenerationError(
+                f"Only {len(out)} usable perspectives generated for {hypothesis!r}; "
+                "need at least 4 for PCA."
+            )
+        return out
+
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
+
+
+def _parse_diverse_json(raw: str) -> dict[int, str]:
+    """Parse a batched diverse-generation response into {id: text}."""
+    text = _JSON_FENCE_RE.sub("", raw).strip()
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise PerspectiveGenerationError(f"Groq returned non-JSON: {raw[:300]!r}") from e
+    items = obj.get("perspectives") if isinstance(obj, dict) else None
+    if not isinstance(items, list):
+        raise PerspectiveGenerationError(f"Expected 'perspectives' list, got: {obj!r}")
+    by_id: dict[int, str] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            idx = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        body = str(item.get("text", "")).strip()
+        if body:
+            by_id[idx] = body
+    return by_id
 
 
 def _parse_perspective_json(raw: str, expected_stances: tuple[str, ...]) -> list[Perspective]:

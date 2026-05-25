@@ -2,29 +2,37 @@
 
 An interpretability system that discovers the fundamental axes of disagreement in scientific hypotheses by analyzing the internal activations of a small base LM (Qwen2.5-3B / Qwen3.5-4B-Base).
 
-## Pipeline
+## Pipeline (per-prompt, on the fly)
+
+Each prompt discovers its **own** axes of disagreement — there is no precomputed
+corpus or frozen global map.
 
 ```
-hypothesis
+one hypothesis
    │
    ▼
-Groq generates 4–8 opposing perspective texts
+Groq generates ~32 diverse perspectives (lens × stance grid)
    │
    ▼
-Qwen base model (on Lambda) processes each text under nnsight.trace
+Qwen base model (on Lambda) processes each under nnsight.trace
    │
    ▼
-Last-token residual-stream activations extracted at every layer → HDF5
+Last-token residual-stream activations at every layer
    │
    ▼
-PCA over the [N, 2560] matrix per layer → top principal components
+PCA over the [~32, d_model] matrix at one mid-late layer → top components
    │
    ▼
-Groq labels each component "X vs Y" then verifies on fresh perspectives
+Groq labels each component "X vs Y" from its high/low perspectives
    │
    ▼
-Streamlit plots where a new hypothesis falls in the discovered axis space
+Streamlit plots the perspectives along the discovered axes
 ```
+
+The orchestration lives in `arguenaut/live.py` (`discover_axes_for_prompt`); the
+Streamlit main page is the whole UX. The batch corpus scripts (`arguenaut-extract`,
+`-pca`, `-label-axes`) still exist for optional global-map analysis but are not
+needed for the per-prompt flow.
 
 ## Layout
 
@@ -83,15 +91,25 @@ cp .env.example .env
 #   LAMBDA_FILE_SYSTEM_NAME   — persistent FS for the HF cache (create once in the console)
 ```
 
-**Each working session**
+**Each working session (per-prompt flow)**
 
 ```bash
 arguenaut-lambda up --wait-healthy             # ~3-8 min first time, ~1 min on subsequent boots with PFS
+streamlit run arguenaut/app/main.py            # type a hypothesis → discover its axes live
+arguenaut-lambda down                          # (optional) stop billing now instead of waiting for idle timeout
+```
+
+That's the whole loop: bring the GPU up, open the app, type a claim, press
+**Discover**. Each prompt spins up ~32 perspectives, extracts activations on the
+GPU, runs PCA, and labels the axes — all live.
+
+**Optional — build a global corpus map** (the original Phase 2–3 batch pipeline):
+
+```bash
 arguenaut-validate --remote                    # sanity-check 3 hypotheses through the GPU
 arguenaut-extract --remote --hypotheses data/hypotheses.json
 arguenaut-pca --layers 16,20,24,28             # runs locally, reads HDF5
 arguenaut-label-axes --remote --top-k 5        # uses GPU for verification extractions
-streamlit run arguenaut/app/main.py            # uses GPU for live "probe a new hypothesis"
 ```
 
 You can leave the instance running while you iterate — it'll self-terminate

@@ -20,7 +20,8 @@ API_PORT="${ARGUENAUT_PORT:-8000}"
 
 WORKDIR="$HOME/arguenaut"
 LOG_DIR="$WORKDIR/logs"
-mkdir -p "$LOG_DIR"
+# NB: do NOT create LOG_DIR yet — that would make $WORKDIR non-empty and break a
+# fresh `git clone` into it. It's created after the clone/update step below.
 
 echo "[bootstrap] === arguenaut bootstrap starting ==="
 echo "[bootstrap] git: $ARGUENAUT_GIT_URL @ $GIT_REF"
@@ -36,10 +37,17 @@ if [ -d "$WORKDIR/.git" ]; then
     git pull --ff-only --quiet || echo "[bootstrap] (non-ff or detached HEAD; leaving as-is)"
 else
     echo "[bootstrap] cloning fresh"
+    # $WORKDIR may exist but lack a .git (e.g. a leftover dir from a failed run or
+    # a stock image). git clone refuses a non-empty target, so clear it first.
+    # Safe: the persistent FS, if any, mounts elsewhere (see ARGUENAUT_PFS).
+    rm -rf "$WORKDIR"
     git clone --quiet "$ARGUENAUT_GIT_URL" "$WORKDIR"
     cd "$WORKDIR"
     git checkout "$GIT_REF"
 fi
+
+# Repo now exists — safe to create the log dir inside it.
+mkdir -p "$LOG_DIR"
 
 # ── .env from base64 ────────────────────────────────────────────────────────
 if [ -n "${ARGUENAUT_ENV_B64:-}" ]; then
@@ -78,7 +86,10 @@ fi
 source .venv/bin/activate
 pip install --quiet --upgrade pip wheel
 echo "[bootstrap] pip install -e .[gpu]  (this may take a while on first run)"
-pip install --quiet -e ".[gpu]"
+# --ignore-requires-python: some Lambda images ship Python 3.10, and the code is
+# 3.10-compatible (all modules use `from __future__ import annotations`), so the
+# >=3.11 metadata floor is overly strict. Bypassing the check is safe here.
+pip install --quiet --ignore-requires-python -e ".[gpu]"
 
 # ── Restart server ──────────────────────────────────────────────────────────
 echo "[bootstrap] stopping any existing arguenaut server"

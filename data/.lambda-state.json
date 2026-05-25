@@ -1,0 +1,12 @@
+{
+  "instance_id": "2fec49b93627472994ced6a3cd80761e",
+  "name": "arguenaut",
+  "ip": "143.47.102.149",
+  "ssh_user": "ubuntu",
+  "api_url": "http://143.47.102.149:8000",
+  "api_port": 8000,
+  "region": "us-east-1",
+  "instance_type": "gpu_1x_a10",
+  "launched_at": 1779689165.4737964,
+  "bootstrap_complete": false
+}
