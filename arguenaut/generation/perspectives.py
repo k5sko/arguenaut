@@ -233,6 +233,81 @@ class PerspectiveGenerator:
             )
         return out
 
+    def judge_and_select(
+        self,
+        hypothesis: str,
+        perspectives: list[Perspective],
+        keep_n: int,
+    ) -> list[Perspective]:
+        """Score each perspective for relevance + substance via one Groq call and
+        return the best `keep_n`. Off-topic (relevance 0) ones are always dropped.
+
+        Best-effort: if judging fails, returns the first `keep_n` unchanged.
+        """
+        if keep_n >= len(perspectives):
+            keep_n = len(perspectives)
+        numbered = "\n".join(f"  {i}. {p.text}" for i, p in enumerate(perspectives))
+        messages = [
+            {"role": "system", "content": JUDGE_SYSTEM},
+            {"role": "user", "content": JUDGE_USER.format(hypothesis=hypothesis.strip(), numbered=numbered)},
+        ]
+        try:
+            scores = _parse_judge_json(self._call(messages))
+        except (PerspectiveGenerationError, json.JSONDecodeError, Exception) as e:  # noqa: BLE001
+            logger.warning("Perspective judging failed (%s); keeping first %d unjudged", e, keep_n)
+            return perspectives[:keep_n]
+
+        ranked: list[tuple[float, int]] = []
+        for i, _p in enumerate(perspectives):
+            rel, sub = scores.get(i, (3, 3))  # missing → neutral, don't punish
+            if rel == 0:
+                continue  # off-topic: drop regardless of rank
+            # relevance matters more than depth; stable tie-break by original order
+            ranked.append((rel * 2 + sub, i))
+        if len(ranked) < min(keep_n, 4):
+            # judge nuked too much — fall back to keeping the top by score then index
+            ranked = [(scores.get(i, (3, 3))[0] * 2 + scores.get(i, (3, 3))[1], i)
+                      for i in range(len(perspectives))]
+        ranked.sort(key=lambda t: (-t[0], t[1]))
+        keep_idx = sorted(i for _s, i in ranked[:keep_n])
+        return [perspectives[i] for i in keep_idx]
+
+
+JUDGE_SYSTEM = """You are screening candidate arguments about a scientific hypothesis for an
+analysis. For EACH numbered argument, rate two things on a 0-5 integer scale:
+  relevance   — how directly it engages THIS specific hypothesis (0 = off-topic, 5 = squarely on-point)
+  substance   — how much real reasoning/mechanism/evidence it contains (0 = empty/vacuous, 5 = substantive)
+Do not reward sophistication of stance — a simple but on-topic, substantive argument scores high.
+Penalise only off-topic, vacuous, or near-duplicate-of-another arguments.
+
+Return STRICT JSON — no prose, no markdown:
+{"scores": [{"id": <n>, "relevance": <0-5>, "substance": <0-5>}, ...]}
+"""
+
+JUDGE_USER = """Hypothesis: {hypothesis}
+
+Arguments:
+{numbered}"""
+
+
+def _parse_judge_json(raw: str) -> dict[int, tuple[int, int]]:
+    text = _JSON_FENCE_RE.sub("", raw).strip()
+    obj = json.loads(text)
+    items = obj.get("scores") if isinstance(obj, dict) else None
+    out: dict[int, tuple[int, int]] = {}
+    if isinstance(items, list):
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            try:
+                idx = int(it.get("id"))
+                rel = int(it.get("relevance", 0))
+                sub = int(it.get("substance", 0))
+            except (TypeError, ValueError):
+                continue
+            out[idx] = (max(0, min(5, rel)), max(0, min(5, sub)))
+    return out
+
 
 _JSON_FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 

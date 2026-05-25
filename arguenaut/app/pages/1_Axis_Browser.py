@@ -1,94 +1,83 @@
-"""Axis Browser — list every discovered axis with labels, confidences, examples."""
+"""Axis Browser — detailed view of each axis from the last per-prompt discovery.
+
+Reads the in-session Discovery produced on the main Hypothesis Explorer page
+(st.session_state["discovery"]) — no corpus/PCA cache involved.
+"""
 
 from __future__ import annotations
 
+import pandas as pd
 import plotly.express as px
 import streamlit as st
-
-from arguenaut.app.data_layer import AppData
 
 st.set_page_config(page_title="Arguenaut — axis browser", layout="wide")
 
 
-@st.cache_resource
-def get_data() -> AppData:
-    return AppData()
-
-
 def main() -> None:
-    data = get_data()
     st.title("Axis browser")
-    st.caption("Every (layer, principal component) the labeller has touched.")
+    st.caption("Detailed view of each axis discovered for your last prompt.")
 
-    layers = data.available_layers()
-    if not layers:
-        st.warning("No PCA cache yet.")
+    disc = st.session_state.get("discovery")
+    if disc is None:
+        st.info("Run a discovery on the **Hypothesis Explorer** (main) page first, then come back here.")
         return
 
-    layer = st.selectbox("Layer", layers, index=len(layers) - 1)
-    axes = data.axes(layer=layer)
-    if not axes:
-        st.info("No axes recorded for this layer.")
-        return
+    st.markdown(f"**Prompt:** {disc.prompt}")
+    st.caption(f"model `{disc.model_id}` · layer {disc.layer}/{disc.n_layers} · {len(disc.perspectives)} perspectives")
 
-    df_rows = []
-    for a in axes:
-        df_rows.append(
-            {
-                "PC": f"PC{a.component_idx + 1}",
-                "label": a.label or "—",
-                "high_pole": a.high_pole or "—",
-                "low_pole": a.low_pole or "—",
-                "confidence": a.confidence if a.confidence is not None else float("nan"),
-                "explained_var": a.explained_var if a.explained_var is not None else float("nan"),
-            }
-        )
-    st.dataframe(df_rows, use_container_width=True)
+    # Overview table of every discovered axis.
+    rows = [
+        {
+            "PC": f"PC{a.component_idx + 1}",
+            "label": a.label,
+            "high pole": a.high_pole,
+            "low pole": a.low_pole,
+            "explained var": round(a.explained_variance, 3),
+        }
+        for a in disc.axes
+    ]
+    st.dataframe(rows, use_container_width=True)
 
-    selected_pc = st.selectbox("Inspect axis", [r["PC"] for r in df_rows])
-    pc_idx = int(selected_pc[2:]) - 1
-    axis = next(a for a in axes if a.component_idx == pc_idx)
+    # Inspect one axis in depth.
+    pc_labels = [f"PC{a.component_idx + 1}" for a in disc.axes]
+    selected = st.selectbox("Inspect axis", pc_labels)
+    pc_idx = int(selected[2:]) - 1
+    axis = next(a for a in disc.axes if a.component_idx == pc_idx)
 
-    st.markdown(f"### {selected_pc} — {axis.label or 'unlabelled'}")
-    cols = st.columns(2)
-    cols[0].metric("HIGH pole", axis.high_pole or "—")
-    cols[1].metric("LOW pole", axis.low_pole or "—")
-    cols2 = st.columns(2)
-    cols2[0].metric("Verification confidence", f"{axis.confidence:.2f}" if axis.confidence is not None else "—")
-    cols2[1].metric("Explained variance", f"{axis.explained_var:.3f}" if axis.explained_var is not None else "—")
+    st.markdown(f"### {selected} — {axis.label}")
+    if axis.rationale:
+        st.caption(axis.rationale)
+    c1, c2 = st.columns(2)
+    c1.metric("▲ high pole", axis.high_pole)
+    c2.metric("▼ low pole", axis.low_pole)
+    c1.metric("explained variance", f"{axis.explained_variance:.3f}")
 
-    pca = data.pca_for_layer(layer)
-    if pca is not None and pc_idx < pca.n_components:
-        df = data.scores_dataframe(layer)
-        df = df.sort_values(f"PC{pc_idx + 1}")
-        st.markdown("##### Five LOWEST-scoring perspectives")
-        st.dataframe(df.head(5)[["topic", "stance", f"PC{pc_idx + 1}", "text"]], use_container_width=True)
-        st.markdown("##### Five HIGHEST-scoring perspectives")
-        st.dataframe(df.tail(5).iloc[::-1][["topic", "stance", f"PC{pc_idx + 1}", "text"]], use_container_width=True)
+    # Distribution of every perspective's score along this axis.
+    scores = [p.scores[pc_idx] for p in disc.perspectives]
+    df = pd.DataFrame(
+        {
+            "score": scores,
+            "stance": [p.stance for p in disc.perspectives],
+            "text": [p.text for p in disc.perspectives],
+            "pole": ["▲ high" if s >= 0 else "▼ low" for s in scores],
+        }
+    ).sort_values("score")
 
-        hist = px.histogram(df, x=f"PC{pc_idx + 1}", nbins=40)
-        hist.update_layout(title="Distribution of projections along this axis", height=300, margin={"l":10,"r":10,"t":40,"b":10})
-        st.plotly_chart(hist, use_container_width=True)
+    hist = px.histogram(
+        df, x="score", color="pole", nbins=24,
+        color_discrete_map={"▲ high": "#ef553b", "▼ low": "#636efa"},
+    )
+    hist.update_layout(
+        title="Where each perspective falls along this axis", height=300,
+        margin={"l": 10, "r": 10, "t": 40, "b": 10},
+    )
+    st.plotly_chart(hist, use_container_width=True)
 
-    st.markdown("##### Refinement history")
-    rounds = data.axis_verifications(axis.id)
-    if not rounds:
-        st.caption("No verification rounds recorded.")
-    else:
-        for r in rounds:
-            with st.expander(f"Round {r['round']} — candidate: {r['candidate']!r}  (score {r['score']:+.2f})"):
-                detail = r.get("detail") or {}
-                st.write(detail.get("rationale", ""))
-                wh = (detail.get("counterexamples") or {}).get("wrong_high") or []
-                wl = (detail.get("counterexamples") or {}).get("wrong_low") or []
-                if wh:
-                    st.markdown("**Predicted HIGH, scored LOW:**")
-                    for t in wh:
-                        st.text(t)
-                if wl:
-                    st.markdown("**Predicted LOW, scored HIGH:**")
-                    for t in wl:
-                        st.text(t)
+    lo, hi = st.columns(2)
+    lo.markdown(f"##### ▼ Lowest on *{axis.low_pole}*")
+    lo.dataframe(df.head(5)[["score", "stance", "text"]], use_container_width=True, hide_index=True)
+    hi.markdown(f"##### ▲ Highest on *{axis.high_pole}*")
+    hi.dataframe(df.tail(5).iloc[::-1][["score", "stance", "text"]], use_container_width=True, hide_index=True)
 
 
 main()

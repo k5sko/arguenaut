@@ -157,12 +157,24 @@ def main() -> None:
         f"Discovered {len(disc.axes)} axes from {len(disc.perspectives)} perspectives "
         f"· model `{disc.model_id}` · layer {disc.layer}/{disc.n_layers}"
     )
+    dropped = disc.n_dropped_judge + disc.n_dropped_duplicate + disc.n_dropped_outlier
+    if disc.n_generated and dropped:
+        st.caption(
+            f"Quality filtering: generated {disc.n_generated}, dropped "
+            f"{disc.n_dropped_judge} low-relevance · {disc.n_dropped_duplicate} duplicate · "
+            f"{disc.n_dropped_outlier} outlier → kept {len(disc.perspectives)}."
+        )
 
     # ── discovered axes ──────────────────────────────────────────────────────
     st.subheader("Discovered axes of disagreement")
     for ax in disc.axes:
         with st.container(border=True):
             st.markdown(_axis_caption(ax))
+            if ax.outlier_driven:
+                st.warning(
+                    "⚠ This axis's variance is dominated by one or two perspectives — "
+                    "treat it as a possible outlier artifact, not a robust shared axis."
+                )
             if ax.rationale:
                 st.caption(ax.rationale)
             hi, lo = st.columns(2)

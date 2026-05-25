@@ -1,74 +1,86 @@
-"""Space Overview — full scatter of all perspectives, with axis-pair toggles."""
+"""Space Overview — the full perspective scatter for the last per-prompt discovery.
+
+Reads the in-session Discovery produced on the main Hypothesis Explorer page
+(st.session_state["discovery"]) — no corpus/PCA cache involved.
+"""
 
 from __future__ import annotations
 
+import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
-
-from arguenaut.app.data_layer import AppData
 
 st.set_page_config(page_title="Arguenaut — space overview", layout="wide")
 
 
-@st.cache_resource
-def get_data() -> AppData:
-    return AppData()
+def _axis_title(disc, idx: int) -> str:
+    if idx < len(disc.axes):
+        return f"PC{idx + 1}: {disc.axes[idx].label}"
+    return f"PC{idx + 1}"
 
 
 def main() -> None:
-    data = get_data()
     st.title("Space overview")
-    st.caption("The full disagreement landscape, colour-coded by topic.")
+    st.caption("The full perspective cloud for your last prompt, along the discovered axes.")
 
-    layers = data.available_layers()
-    if not layers:
-        st.warning("No PCA cache yet.")
+    disc = st.session_state.get("discovery")
+    if disc is None:
+        st.info("Run a discovery on the **Hypothesis Explorer** (main) page first, then come back here.")
         return
 
-    layer = st.selectbox("Layer", layers, index=len(layers) - 1)
-    pca = data.pca_for_layer(layer)
-    if pca is None:
-        return
-    df = data.scores_dataframe(layer)
-    if df.empty:
-        st.info("No perspectives stored.")
-        return
+    st.markdown(f"**Prompt:** {disc.prompt}")
+    st.caption(f"model `{disc.model_id}` · layer {disc.layer}/{disc.n_layers} · {len(disc.perspectives)} perspectives")
 
-    pcs = [f"PC{i + 1}" for i in range(pca.n_components)]
+    n_pc = len(disc.explained_variance_ratio)
+    df = pd.DataFrame(
+        {
+            **{f"PC{i + 1}": [p.scores[i] for p in disc.perspectives] for i in range(n_pc)},
+            "stance": [p.stance for p in disc.perspectives],
+            "text": [p.text for p in disc.perspectives],
+        }
+    )
+    pcs = [f"PC{i + 1}" for i in range(n_pc)]
     mode = st.radio("Plot", ["2D scatter", "3D scatter"], horizontal=True)
 
-    if mode == "2D scatter":
+    if mode == "2D scatter" or n_pc < 3:
         c1, c2 = st.columns(2)
-        x = c1.selectbox("X", pcs, index=0)
-        y = c2.selectbox("Y", pcs, index=1)
+        xi = c1.selectbox("X", range(n_pc), format_func=lambda i: pcs[i], index=0)
+        yi = c2.selectbox("Y", range(n_pc), format_func=lambda i: pcs[i], index=min(1, n_pc - 1))
         fig = px.scatter(
-            df, x=x, y=y, color="topic",
-            hover_data={"hypothesis": True, "stance": True, "text": True},
-            symbol="stance",
-            opacity=0.8,
+            df, x=pcs[xi], y=pcs[yi], color="stance",
+            hover_data={"text": True}, opacity=0.85,
+            labels={pcs[xi]: _axis_title(disc, xi), pcs[yi]: _axis_title(disc, yi)},
         )
-        fig.update_traces(marker={"size": 9, "line": {"width": 0.5, "color": "white"}})
-        fig.update_layout(height=650, margin={"l": 10, "r": 10, "t": 30, "b": 10})
+        fig.update_traces(marker={"size": 11, "line": {"width": 0.5, "color": "white"}})
+        fig.add_hline(y=0, line_width=1, line_dash="dot", line_color="gray")
+        fig.add_vline(x=0, line_width=1, line_dash="dot", line_color="gray")
+        fig.update_layout(height=650, margin={"l": 10, "r": 10, "t": 30, "b": 10},
+                          legend={"orientation": "h", "yanchor": "bottom", "y": -0.25})
         st.plotly_chart(fig, use_container_width=True)
     else:
         c1, c2, c3 = st.columns(3)
-        x = c1.selectbox("X", pcs, index=0)
-        y = c2.selectbox("Y", pcs, index=1)
-        z = c3.selectbox("Z", pcs, index=min(2, len(pcs) - 1))
+        xi = c1.selectbox("X", range(n_pc), format_func=lambda i: pcs[i], index=0)
+        yi = c2.selectbox("Y", range(n_pc), format_func=lambda i: pcs[i], index=1)
+        zi = c3.selectbox("Z", range(n_pc), format_func=lambda i: pcs[i], index=2)
         fig = px.scatter_3d(
-            df, x=x, y=y, z=z, color="topic",
-            hover_data={"hypothesis": True, "stance": True},
-            opacity=0.8,
+            df, x=pcs[xi], y=pcs[yi], z=pcs[zi], color="stance",
+            hover_data={"text": True}, opacity=0.85,
+            labels={pcs[xi]: f"PC{xi+1}", pcs[yi]: f"PC{yi+1}", pcs[zi]: f"PC{zi+1}"},
         )
-        fig.update_traces(marker={"size": 4})
+        fig.update_traces(marker={"size": 5})
         fig.update_layout(height=720, margin={"l": 0, "r": 0, "t": 30, "b": 0})
         st.plotly_chart(fig, use_container_width=True)
 
-    st.markdown("##### Filter by topic")
-    topics = sorted(df["topic"].unique())
-    chosen = st.multiselect("Topics", topics, default=topics)
-    sub = df[df["topic"].isin(chosen)]
-    st.dataframe(sub[["topic", "hypothesis", "stance", "text"]], use_container_width=True)
+    # Explained-variance bar.
+    ev = disc.explained_variance_ratio
+    bar = go.Figure(go.Bar(x=pcs, y=ev))
+    bar.update_layout(title="Variance explained by each component", yaxis_title="fraction",
+                      height=260, margin={"l": 10, "r": 10, "t": 40, "b": 10})
+    st.plotly_chart(bar, use_container_width=True)
+
+    with st.expander("All perspectives"):
+        st.dataframe(df[["stance", "text", *pcs]], use_container_width=True, hide_index=True)
 
 
 main()
