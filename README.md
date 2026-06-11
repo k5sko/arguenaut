@@ -1,4 +1,4 @@
-# Arguenaut
+# Arguenaut [This is not fully up to date with my local work]
 
 An interpretability system that discovers the fundamental axes of disagreement in scientific hypotheses by analyzing the internal activations of a small base LM (Qwen2.5-3B / Qwen3.5-4B-Base).
 
